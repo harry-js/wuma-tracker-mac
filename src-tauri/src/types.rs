@@ -1,6 +1,5 @@
 use anyhow::Result;
 use futures::channel::mpsc as futures_mpsc;
-use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
@@ -10,22 +9,6 @@ use webrtc::data_channel::RTCDataChannel;
 use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
 use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
-
-#[repr(C)]
-#[derive(Copy, Clone, serde::Serialize)]
-pub struct FVector {
-    x: f32,
-    y: f32,
-    z: f32,
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, serde::Serialize)]
-pub struct FRotator {
-    pitch: f32,
-    yaw: f32,
-    roll: f32,
-}
 
 #[repr(C)]
 #[derive(Copy, Clone, serde::Serialize, serde::Deserialize, Debug)]

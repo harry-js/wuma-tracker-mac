@@ -147,6 +147,14 @@ impl RtcSupervisor {
                             }).await;
                         }
                         CollectorMessage::TemporalError(e) => {
+                            if e.contains("'GWorld' 포인터가 유효하지 않습니다. raw=0")
+                                || e.contains("'GWorld' 위치")
+                            {
+                                // 로딩/씬 전환 중에는 GWorld가 잠시 0이 될 수 있으므로
+                                // 사용자 에러 토스트를 띄우지 않고 다음 수집 주기를 기다립니다.
+                                log::debug!("Transient GWorld unready state: {}", e);
+                                continue;
+                            }
                             if let Err(e) = app_handle.emit("handle-tracker-error", e.clone()) {
                                 log::error!("Error sending collector error to frontend: {}", e);
                             };

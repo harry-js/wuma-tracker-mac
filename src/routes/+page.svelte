@@ -3,6 +3,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { exit } from '@tauri-apps/plugin-process';
+  import { open } from '@tauri-apps/plugin-shell';
   import { getVersion } from '@tauri-apps/api/app';
 
   // Svelte 및 라이브러리 임포트
@@ -86,6 +87,15 @@
     } catch (err) {
       console.error('Failed to copy code: ', err);
       toast.error('방 코드 복사에 실패했습니다.');
+    }
+  }
+
+  async function openWuwaMaps() {
+    try {
+      await open('https://maps.wuwa.moe/');
+    } catch (err) {
+      console.error('Failed to open Wuwa Maps:', err);
+      toast.error('명조 맵스 열기에 실패했습니다.');
     }
   }
 
@@ -375,6 +385,10 @@
           </div>
         </div>
       {/if}
+
+      <Button variant="outline" class="w-full" onclick={openWuwaMaps}>
+        명조 맵스
+      </Button>
 
       <div class="flex space-x-3 pt-2">
         <Button class="flex-1" onclick={attach}>

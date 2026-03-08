@@ -6,8 +6,12 @@ mod rtc_supervisor;
 mod signaling_handler;
 mod types;
 mod util;
-mod win_proc;
 mod offset_manager;
+#[cfg(target_os = "macos")]
+mod mac_proc;
+#[cfg(target_os = "windows")]
+mod win_proc;
+mod platform_proc;
 
 use std::sync::Arc;
 
@@ -20,15 +24,14 @@ use tauri::{
 };
 use tauri_plugin_notification::NotificationExt;
 use tokio::sync::{Mutex, mpsc, oneshot};
-use windows::core::AgileReference;
 use types::{GlobalState, LocalStorageConfig};
 use util::get_config;
-use crate::offsets::WuwaOffset;
+#[cfg(all(feature = "store", target_os = "windows"))]
+use windows::core::AgileReference;
 
 struct TauriState {
     supervisor_tx: mpsc::Sender<SupervisorCommand>,
     global_state: Arc<Mutex<GlobalState>>,
-    offsets: Arc<Mutex<Option<Vec<WuwaOffset>>>>,
 }
 
 #[tauri::command]
@@ -39,21 +42,31 @@ fn is_store_build() -> bool {
 #[tauri::command]
 async fn find_and_attach(app_handle: AppHandle) -> Result<(), String> {
     let state = app_handle.state::<TauriState>();
-    let (resp_tx, resp_rx) = oneshot::channel();
-    state
-        .supervisor_tx
-        .send(SupervisorCommand::AttachProcess(
-            "Client-Win64-Shipping.exe".to_string(),
-            resp_tx,
-        ))
-        .await
-        .map_err(|e| format!("앱 내부 오류: {}", e))?;
+    let mut errors = Vec::new();
 
-    match resp_rx.await {
-        Ok(Ok(_)) => Ok(()),
-        Ok(Err(e)) => Err(e),
-        Err(e) => Err(format!("앱 내부 오류: {}", e)),
+    for candidate in process_name_candidates() {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        state
+            .supervisor_tx
+            .send(SupervisorCommand::AttachProcess(candidate.to_string(), resp_tx))
+            .await
+            .map_err(|e| format!("앱 내부 오류: {}", e))?;
+
+        match resp_rx.await {
+            Ok(Ok(_)) => return Ok(()),
+            Ok(Err(e)) => errors.push(format!("{} -> {}", candidate, e)),
+            Err(e) => return Err(format!("앱 내부 오류: {}", e)),
+        }
     }
+
+    if errors.is_empty() {
+        return Err("지원 가능한 게임 프로세스를 찾지 못했습니다.".to_string());
+    }
+
+    Err(format!(
+        "프로세스 연결 실패. 시도한 대상: {}",
+        errors.join(" | ")
+    ))
 }
 
 #[tauri::command]
@@ -133,7 +146,7 @@ async fn channel_set_global_state(app_handle: AppHandle, value: GlobalState) -> 
     };
 }
 
-#[cfg(feature = "store")]
+#[cfg(all(feature = "store", target_os = "windows"))]
 async fn check_store_updates_background(app_handle: AppHandle) -> Result<(), String> {
     use windows::Services::Store::StoreContext;
 
@@ -157,6 +170,21 @@ async fn check_store_updates_background(app_handle: AppHandle) -> Result<(), Str
         }).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+fn process_name_candidates() -> &'static [&'static str] {
+    #[cfg(target_os = "windows")]
+    {
+        return &["Client-Win64-Shipping.exe"];
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        return &["Client-Mac-Shipping", "Wuthering Waves", "WutheringWaves"];
+    }
+
+    #[allow(unreachable_code)]
+    &[]
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -191,7 +219,6 @@ pub async fn run() {
         .manage(TauriState {
             supervisor_tx,
             global_state: Arc::new(Mutex::new(GlobalState::default())),
-            offsets: offsets_shared
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(
@@ -288,7 +315,7 @@ pub async fn run() {
                     .await
             });
 
-            #[cfg(feature = "store")]
+            #[cfg(all(feature = "store", target_os = "windows"))]
             {
                 let handle = app.handle().clone();
                 tokio::spawn(async move {

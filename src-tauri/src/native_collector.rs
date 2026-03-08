@@ -1,20 +1,20 @@
 use crate::types::{CollectorMessage, NativeError};
-use crate::win_proc::WinProc;
+use crate::platform_proc::PlatformProc;
 use anyhow::Result;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, mpsc, oneshot};
 use crate::offsets::WuwaOffset;
 
-/// 단순 Windows Process Wrapper
+/// 플랫폼별 네이티브 프로세스 래퍼
 pub struct NativeCollector {
-    win_proc: WinProc,
+    proc: PlatformProc,
 }
 
 impl NativeCollector {
     pub async fn new(proc_name: &str) -> Result<Self> {
-        let win_proc = WinProc::new(proc_name)?;
-        Ok(Self { win_proc })
+        let proc = PlatformProc::new(proc_name)?;
+        Ok(Self { proc })
     }
 }
 
@@ -26,6 +26,7 @@ pub async fn collection_loop(
 ) {
     let mut offset_reported = false;
     loop {
+        let mut delay_ms: u64 = 120;
         // Work Phase
         {
             // 1. 상태 관리자를 잠그고 공유 상태에 접근합니다.
@@ -41,11 +42,11 @@ pub async fn collection_loop(
             let offsets_guard = offsets_arc.lock().await;
 
             // 3. get_location을 호출하고 결과를 매칭합니다.
-            match collector.win_proc.get_location(&*offsets_guard).await {
+            match collector.proc.get_location(&*offsets_guard).await {
                 // 성공 시 데이터 전송
                 Ok(loc) => {
                     if !offset_reported {
-                        if let Some(name) = collector.win_proc.get_active_offset_name() {
+                        if let Some(name) = collector.proc.get_active_offset_name() {
                             // RtcSupervisor에게 OffsetFound 메시지를 보냅니다.
                             if pm_tx.send(CollectorMessage::OffsetFound(name)).await.is_err() {
                                 log::info!("Collection loop exiting: no receiver");
@@ -58,6 +59,7 @@ pub async fn collection_loop(
                         log::info!("Collection loop exiting: no receiver");
                         break;
                     }
+                    delay_ms = 80;
                 }
 
                 // '프로세스 종료'는 치명적 오류
@@ -69,13 +71,21 @@ pub async fn collection_loop(
 
                 // 그 외 모든 오류는 일시적인 것으로 간주
                 Err(e) => {
-                    if pm_tx
-                        .send(CollectorMessage::TemporalError(e.to_string()))
-                        .await
-                        .is_err()
-                    {
-                        log::info!("Collection loop exiting: no receiver");
-                        break;
+                    let msg = e.to_string();
+                    let is_transient_gworld = msg.contains("'GWorld' 포인터가 유효하지 않습니다. raw=0")
+                        || msg.contains("'GWorld' 위치");
+                    if is_transient_gworld {
+                        // 로딩/씬 전환 중 일시 상태는 빠르게 재시도하고 UI 이벤트는 생략합니다.
+                        delay_ms = 40;
+                    } else {
+                        if pm_tx
+                            .send(CollectorMessage::TemporalError(msg))
+                            .await
+                            .is_err()
+                        {
+                            log::info!("Collection loop exiting: no receiver");
+                            break;
+                        }
                     }
                 }
             }
@@ -88,7 +98,7 @@ pub async fn collection_loop(
                 break;
             }
 
-            _ = tokio::time::sleep(Duration::from_millis(500)) => {}
+            _ = tokio::time::sleep(Duration::from_millis(delay_ms)) => {}
         }
     }
 }

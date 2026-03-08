@@ -61,6 +61,43 @@ Tauri, SvelteKit, TypeScript를 기반으로 제작되었습니다.
     pnpm tauri dev
     ```
 
+### macOS 참고사항
+
+- macOS에서도 빌드/실행은 가능합니다.
+- 다만 게임 프로세스 메모리 접근은 `task_for_pid` 권한이 필요하므로, 개발 환경에서는 관리자 권한으로 실행해야 연결이 가능합니다.
+- 게임 프로세스 이름은 `Client-Mac-Shipping`, `Wuthering Waves`, `WutheringWaves` 순서로 자동 탐색합니다.
+
+### macOS 빌드 방법
+
+로컬 사용 기준(업데이트 서명 생략)으로 `.app`만 빌드:
+
+```bash
+node -e 'const fs=require("fs"); const p="src-tauri/tauri.conf.json"; const o=JSON.parse(fs.readFileSync(p,"utf8")); o.bundle=o.bundle||{}; o.bundle.createUpdaterArtifacts=false; fs.writeFileSync("src-tauri/tauri.conf.localbuild.json", JSON.stringify(o,null,2));'
+pnpm tauri build --bundles app --config src-tauri/tauri.conf.localbuild.json
+codesign --force --deep --sign - src-tauri/target/release/bundle/macos/WumaTracker.app
+xattr -dr com.apple.quarantine src-tauri/target/release/bundle/macos/WumaTracker.app
+rm -f src-tauri/tauri.conf.localbuild.json
+```
+
+빌드 결과:
+- `src-tauri/target/release/bundle/macos/WumaTracker.app`
+
+### macOS 빌드 후 실행 방법
+
+1. Finder에서 아래 앱을 직접 실행합니다.
+   - `src-tauri/target/release/bundle/macos/WumaTracker.app`
+2. 실행 차단이 뜨면 우클릭 -> `열기`로 1회 허용합니다.
+3. 게임 연결 시 권한 이슈가 있으면 아래 중 하나를 사용합니다.
+
+권장(일반 사용자용):
+- `시스템 설정 -> 개인정보 보호 및 보안 -> 개발자 도구(Developer Tools)`에서
+  사용 중인 터미널(iTerm/Terminal) 또는 앱을 허용한 뒤 다시 실행
+
+확실한 방법(개발/테스트):
+```bash
+sudo src-tauri/target/release/bundle/macos/WumaTracker.app/Contents/MacOS/wuma-tracker
+```
+
 -----
 
 ## 📂 프로젝트 구조

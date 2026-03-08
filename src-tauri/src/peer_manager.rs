@@ -1,5 +1,5 @@
 use crate::types::{Peer, PlayerInfo, RtcSignal, SERVER_ID, SignalPacket, ManagedPeer};
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -193,8 +193,4 @@ impl PeerManager {
         Ok(())
     }
 
-    // Supervisor가 피어의 수를 확인할 수 있는 메서드를 추가
-    pub fn peer_count(&self) -> usize {
-        self.peers.len()
-    }
 }

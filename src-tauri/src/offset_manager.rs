@@ -9,10 +9,19 @@ use tokio::sync::Mutex;
 const CACHE_FILE: &str = "offsets_cache.json";
 
 fn get_remote_urls() -> Vec<&'static str> {
-    let mut urls = vec![
-        "https://wuwa.moe/tracker-offsets.json",
-        "https://raw.githubusercontent.com/wuwamoe/wuwa-moe/refs/heads/main/static/tracker-offsets.json",
-    ];
+    let mut urls = vec![];
+
+    #[cfg(target_os = "macos")]
+    {
+        urls.insert(0, "https://raw.githubusercontent.com/harry-js/wuma-tracker-mac/static/tracker-offsets-mac.json");
+        urls.insert(0, "https://wuwa.moe/tracker-offsets-mac.json");
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        urls.push("https://wuwa.moe/tracker-offsets.json");
+        urls.push("https://raw.githubusercontent.com/wuwamoe/wuwa-moe/refs/heads/main/static/tracker-offsets.json");
+    }
 
     #[cfg(debug_assertions)]
     {
@@ -48,11 +57,19 @@ pub async fn load_offsets(app_handle: &tauri::AppHandle) -> Result<Vec<WuwaOffse
         }
         Err(e) => {
             log::warn!("모든 서버 연결 실패, 로컬 캐시를 사용합니다. 에러: {}", e);
-            let error_message = String::from("오프셋 동기화 실패");
-            if let Err(emit_err) = app_handle.emit("report-error-toast", error_message) {
-                log::error!("Failed to emit error to frontend: {}", emit_err);
+            match load_cache(&cache_path).or_else(|_| load_bundled_defaults()) {
+                Ok(data) => {
+                    log::info!("원격 동기화 실패로 로컬 오프셋을 사용합니다.");
+                    Ok(data)
+                }
+                Err(local_err) => {
+                    let error_message = String::from("오프셋 로딩 실패");
+                    if let Err(emit_err) = app_handle.emit("report-error-toast", error_message) {
+                        log::error!("Failed to emit error to frontend: {}", emit_err);
+                    }
+                    Err(anyhow!("원격/로컬 오프셋 로딩 실패: {}", local_err))
+                }
             }
-            load_cache(&cache_path)
         }
     }
 }
@@ -94,4 +111,18 @@ fn save_cache(path: &PathBuf, data: &Vec<WuwaOffset>) -> Result<()> {
 fn load_cache(path: &PathBuf) -> Result<Vec<WuwaOffset>> {
     let data = fs::read_to_string(path).context("저장된 캐시가 없습니다.")?;
     Ok(serde_json::from_str(&data)?)
+}
+
+fn load_bundled_defaults() -> Result<Vec<WuwaOffset>> {
+    #[cfg(target_os = "macos")]
+    let raw = include_str!("../../static/tracker-offsets-mac.json");
+    #[cfg(not(target_os = "macos"))]
+    let raw = include_str!("../../static/tracker-offsets.json");
+
+    let parsed = serde_json::from_str::<Vec<WuwaOffset>>(raw)
+        .context("번들 기본 오프셋 파싱 실패")?;
+    if parsed.is_empty() {
+        return Err(anyhow!("번들 기본 오프셋이 비어 있습니다."));
+    }
+    Ok(parsed)
 }
